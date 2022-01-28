@@ -1,128 +1,129 @@
 from __future__ import print_function
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-import copy
+
+from util import load_ImageNet_hierarchy
+
+
+@torch.no_grad()
+def gather_all(x):
+    tensors_gather = [torch.ones_like(x) for _ in range(torch.distributed.get_world_size())]
+    torch.distributed.all_gather(tensors_gather, x, async_op=False)
+    return torch.cat(tensors_gather, dim=0)
 
 
 class ContrastiveRanking(nn.Module):
     def __init__(self, opt, gen_model):
-        super().__init__()
+        super(ContrastiveRanking, self).__init__()
+        self.multiGPU = opt.ngpus_per_node > 1
+        self.gpu = opt.gpu
         self.m = opt.m
+        self.supervised_mode = opt.supervised_mode
         self.do_sum_in_log = opt.do_sum_in_log
         self.feature_size = 128
 
-        self.backbone_q = gen_model(name=opt.model)
-        self.backbone_k = gen_model(name=opt.model)
+        if opt.model == 'resnet18':
+            dim_mlp = 512
+        elif opt.model == 'resnet50':
+            dim_mlp = 2048
+
+        # create netrworks
+        self.backbone_q = gen_model(num_classes=self.feature_size)
+        self.backbone_q.fc = nn.Sequential(nn.Linear(dim_mlp, dim_mlp), nn.ReLU(), self.backbone_q.fc)
+        self.backbone_k = gen_model(num_classes=self.feature_size)
+        self.backbone_k.fc = nn.Sequential(nn.Linear(dim_mlp, dim_mlp), nn.ReLU(), self.backbone_k.fc)
         for param_k, param_q in zip(self.backbone_k.parameters(), self.backbone_q.parameters()):
+            param_q.requires_grad = True
             param_k.data = param_q.data
             param_k.requires_grad = False
+
+        # initalize memorybank
         self.register_buffer("memorybank_InfoNCE", torch.randn(opt.memorybank_size, self.feature_size))
         self.memorybank_InfoNCE = nn.functional.normalize(self.memorybank_InfoNCE, dim=1)
         self.register_buffer("memorybank_labels", torch.ones(opt.memorybank_size, dtype=torch.long) * -1)
+        self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
 
         self.min_tau = opt.min_tau
         self.max_tau = opt.max_tau
         self.similarity_threshold = opt.similarity_threshold
-        self.n_sim_classes = opt.n_sim_classes
+        self.sample_n_simclasses = opt.sample_n_simclasses
         self.use_dynamic_tau = opt.use_dynamic_tau
-        self.use_all_ranked_classes_above_threshold = self.similarity_threshold > 0
-        self.use_same_and_similar_class = opt.use_same_and_similar_class
-        self.one_loss_per_rank = opt.one_loss_per_rank
         self.mixed_out_in = opt.mixed_out_in
+        self.roberta_threshold = opt.roberta_threshold
+        self.roberta_float_threshold = opt.roberta_float_threshold
+        self.roberta_threshold = opt.roberta_threshold
+        self.cifarload_ImageNet_hierarchy_superclass_noise_lvl = opt.cifar_superclass_noise_lvl
+        self.k_roberta_sims = opt.k_roberta_sims
 
-        class_names = np.load('./cifar100_idx2className.npy', allow_pickle=True).item()
-        self.set_super_cat_sims(class_names)
+        self.n_sim_classes, self.class_sims_idx = load_ImageNet_hierarchy(
+            opt.hierarchy_k, opt.class_to_idx,
+            roberta_float_thresholds=self.roberta_float_threshold,
+            loss_type=opt.loss_type,
+            nameSimsPath=opt.nameSimPath,
+            path_name2wordnet=opt.path_name2wordnet)
 
         self.criterion = ContrastiveRankingLoss()
 
+    @torch.no_grad()
+    def shuffle_gpu_batches(self, x):
+        batch_size_per_gpu = x.shape[0]
+        samples = gather_all(x)
+        batch_size_all = samples.shape[0]
+        num_gpus = batch_size_all // batch_size_per_gpu
+        shuffle_indices = torch.randperm(batch_size_all).to(self.gpu)
+        torch.distributed.broadcast(shuffle_indices, src=0)
+        unshuffle_indices = torch.argsort(shuffle_indices)
 
-    def set_super_cat_sims(self, class_names):
-        cats = {'aquatic mammals': 	['beaver', 'dolphin', 'otter', 'seal', 'whale'],
-                'fish': ['aquarium_fish', 'flatfish', 'ray', 'shark', 'trout'],
-                'flowers' :['orchid', 'poppy', 'rose', 'sunflower', 'tulip'],
-                'food containers': ['bottle', 'bowl', 'can', 'cup', 'plate'],
-                'fruit and vegetables': ['apple', 'mushroom', 'orange', 'pear', 'sweet_pepper'],
-                'household electrical devices': ['clock', 'keyboard', 'lamp', 'telephone', 'television'],
-                'household furniture': ['bed', 'chair', 'couch', 'table', 'wardrobe'],
-                'insects': ['bee', 'beetle', 'butterfly', 'caterpillar', 'cockroach'],
-                'large carnivores': ['bear', 'leopard', 'lion', 'tiger', 'wolf'],
-                'large man-made outdoor things': ['bridge', 'castle', 'house', 'road', 'skyscraper'],
-                'large natural outdoor scenes': ['cloud', 'forest', 'mountain', 'plain', 'sea'],
-                'large omnivores and herbivores': ['camel', 'cattle', 'chimpanzee', 'elephant', 'kangaroo'],
-                'medium-sized mammals': ['fox', 'porcupine', 'possum', 'raccoon', 'skunk'],
-                'non-insect invertebrates': ['crab', 'lobster', 'snail', 'spider', 'worm'],
-                'people': ['baby', 'boy', 'girl', 'man', 'woman'],
-                'reptiles': ['crocodile', 'dinosaur', 'lizard', 'snake', 'turtle'],
-                'small mammals': [	'hamster', 'mouse', 'rabbit', 'shrew', 'squirrel'],
-                'trees': ['maple_tree', 'oak_tree', 'palm_tree', 'pine_tree', 'willow_tree'],
-                'vehicles 1': ['bicycle', 'bus', 'motorcycle', 'pickup_truck', 'train'],
-                'vehicles 2': ['lawn_mower', 'rocket', 'streetcar', 'tank', 'tractor']
-                }
+        gpu_idx = torch.distributed.get_rank()
+        idx_gpu = shuffle_indices.view(num_gpus, -1)[gpu_idx]
+        samples_gpu = samples[idx_gpu]
 
-        name2idx = {}
-        for idx in class_names:
-            key = class_names[idx]
-            name2idx[key] = idx
-        self.class_sims_idx = {}
-        for idx in class_names.keys():
-            self.class_sims_idx[idx] = {}
-            word = class_names[idx]
-            #get supercat of word
-            for supercat in cats.keys():
-                if word in cats[supercat]:
-                    similar_cats = copy.copy(cats[supercat])
-                    similar_cats.remove(word)
-                    similar_cats = [word] + similar_cats
+        return samples_gpu, unshuffle_indices
 
-            #sort out supercats from list of all classes
-            other_cats = list(class_names.values())
-            for cat in similar_cats:
-                other_cats.remove(cat)
-            self.class_sims_idx[idx]['sim_class_idx2name'] = similar_cats + other_cats
+    @torch.no_grad()
+    def unshuffle_gpu_batches(self, x, unshuffle_indices):
+        batch_size_per_gpu = x.shape[0]
+        samples = gather_all(x)
+        batch_size_all = samples.shape[0]
+        num_gpus = batch_size_all // batch_size_per_gpu
 
-            sim_class_idx2indices = [name2idx[word] for word in self.class_sims_idx[idx]['sim_class_idx2name']]
-            self.class_sims_idx[idx]['sim_class_idx2indices'] = torch.tensor(sim_class_idx2indices).type(
-                torch.long).cuda()
-            self.class_sims_idx[idx]['sim_class_val'] = torch.cat(
-                [torch.ones((len(similar_cats), 1), dtype=torch.float32) * 0.75,
-                 torch.zeros((len(other_cats), 1), dtype=torch.float32)], dim=0).squeeze()
-            self.class_sims_idx[idx]['sim_class_val'][0] = 1
+        # restored index for this gpu
+        gpu_idx = torch.distributed.get_rank()
+        idx_gpu = unshuffle_indices.view(num_gpus, -1)[gpu_idx]
+        samples_gpu = samples[idx_gpu]
+        return samples_gpu
 
-    # video_view1, video_view2 are batches of the same videos but independently augmented
-    def forward(self, anchor, pos, labels):
-        # compute scores
-        l_pos, l_class_pos, l_neg, masks, below_threshold, dynamic_taus = self.compute_InfoNCE_classSimilarity(
+    def forward(self, images_q, images_k, labels):
+
+        anchor = self.backbone_q(images_q)
+        anchor = nn.functional.normalize(anchor, dim=1)
+        with torch.no_grad():
+            self.update_weights()
+            # shuffle for making use of BN
+            pos = images_k
+            if self.multiGPU:
+                pos, idx_unshuffle = self.shuffle_gpu_batches(pos)
+
+            pos = self.backbone_k(pos)
+            pos = nn.functional.normalize(pos, dim=1)
+            if self.multiGPU:
+                pos = self.unshuffle_gpu_batches(pos, idx_unshuffle)
+
+        l_pos, l_class_pos, l_neg, masks, dynamic_taus, pos_enq, labels_enq = self.compute_InfoNCE_classSimilarity(
             anchor=anchor, pos=pos, labels=labels)
 
-        #initially l_neg and l_class pos are identical
+        # initially l_neg and l_class pos are identical
         res = {}
         for i, mask in enumerate(masks):
-            if (self.use_same_and_similar_class and not i == 0):
-                mask = masks[-1]
-                for j in range(len(masks)-1):
-                    mask = mask | masks[j]
-                l_neg[mask & ~below_threshold[i]] = -float("inf")
-                l_class_pos_cur = l_class_pos.clone()
-                #keep only members of current class
-                l_class_pos_cur[~mask] = -float("inf")
-                # throw out those batches for which the similarity between ranking class and label class is below threshold
-                l_class_pos_cur[below_threshold[i]] = -float("inf")
-
-            elif self.use_all_ranked_classes_above_threshold or (self.use_same_and_similar_class and i == 0):
-                # mask out from negatives only if they are part of the class and this class has a similarity to
-                # label class above the similarity threshold
-                l_neg[mask & ~below_threshold[i]] = -float("inf")
-                l_class_pos_cur = l_class_pos.clone()
-                l_class_pos_cur[~mask] = -float("inf")
-                l_class_pos_cur[below_threshold[i]] = -float("inf")
-
-            else:
-                l_neg[mask] = -float("inf")
-                l_class_pos_cur = l_class_pos.clone()
-                l_class_pos_cur[~mask] = -float("inf")
+            # mask out from negatives only if they are part of the class and this class has a similarity to
+            # label class above the similarity threshold
+            l_neg[mask] = -float("inf")
+            l_class_pos_cur = l_class_pos.clone()
+            # keep only members of current class
+            l_class_pos_cur[~mask] = -float("inf")
             taus = dynamic_taus[i].view(-1, 1)
 
             if i == 0:
@@ -130,7 +131,7 @@ class ContrastiveRanking(nn.Module):
 
             if self.mixed_out_in and i == 0:
                 loss = self.sum_out_log(l_class_pos_cur, l_neg, taus)
-            elif self.do_sum_in_log and not(self.mixed_out_in and i ==0):
+            elif self.do_sum_in_log and not (self.mixed_out_in and i == 0):
                 loss = self.sum_in_log(l_class_pos_cur, l_neg, taus)
             else:
                 loss = self.sum_out_log(l_class_pos_cur, l_neg, taus)
@@ -139,10 +140,6 @@ class ContrastiveRanking(nn.Module):
                       'target': None,
                       'loss': loss}
             res['class_similarity_ranking_class' + str(i)] = result
-
-            if (self.use_same_and_similar_class and not i == 0):
-                break
-
 
         return self.criterion(res, labels)
 
@@ -154,7 +151,7 @@ class ContrastiveRanking(nn.Module):
         if len(sum_pos) > 0:
             loss = - torch.log(sum_pos).mean()
         else:
-            loss = torch.tensor([0.0]).cuda()
+            loss = torch.tensor([0.0]).to(l_pos.device)
         return loss
 
     def sum_out_log(self, l_pos, l_neg, tau):
@@ -167,63 +164,68 @@ class ContrastiveRanking(nn.Module):
         if len(all_scores) > 0:
             loss = - torch.log(all_scores).mean()
         else:
-            loss = torch.tensor([0.0]).cuda()
+            loss = torch.tensor([0.0]).to(l_pos.device)
         return loss
 
+    @torch.no_grad()
     def get_similar_labels(self, labels):
-        # in this case use top n classes
+
         labels = labels.cpu().numpy()
 
         sim_class_labels = torch.zeros(
-            (labels.shape[0], len(self.class_sims_idx[0]['sim_class_idx2indices']))).cuda().type(torch.long)
+            (labels.shape[0], len(self.class_sims_idx[0]['sim_class_idx2indices']))).to(self.gpu, torch.long)
         sim_class_sims = torch.zeros(
-            (labels.shape[0], len(self.class_sims_idx[0]['sim_class_idx2indices']))).cuda().type(torch.float)
+            (labels.shape[0], len(self.class_sims_idx[0]['sim_class_idx2indices']))).to(self.gpu, torch.float)
         sim_leq_thresh = torch.zeros(
-            (labels.shape[0], len(self.class_sims_idx[0]['sim_class_idx2indices']))).cuda().type(torch.bool)
+            (labels.shape[0], len(self.class_sims_idx[0]['sim_class_idx2indices']))).to(self.gpu, torch.bool)
         for i, label in enumerate(labels):
             sim_class_labels[i, :] = self.class_sims_idx[label]['sim_class_idx2indices']
             sim_class_sims[i, :] = self.class_sims_idx[label]['sim_class_val']
             sim_leq_thresh[i, :] = self.class_sims_idx[label]['sim_class_val'] >= self.similarity_threshold
-        # remove columns in which no sample has a similarity  qual to or larger than the selected threshold
+        # remove columns in which no sample has a similarity  equal to or larger than the selected threshold
         at_least_one_leq_thrsh = torch.sum(sim_leq_thresh, dim=0) > 0
         sim_class_labels = sim_class_labels[:, at_least_one_leq_thrsh]
-        sim_leq_thresh = sim_leq_thresh[:, at_least_one_leq_thrsh]
 
         sim_class_labels = sim_class_labels[:, :self.n_sim_classes]
         sim_class_sims = sim_class_sims[:, :self.n_sim_classes]
+        if self.k_roberta_sims:
+            sim_class_sims[:, 0] = 1.
+            sim_class_sims[:, 1:] = 0.75
+            if self.hierarchy_k > 1:
+                raise NotImplementedError('only support hierarchy_k=1')
 
-        # negate sim_leq_thresh to get a mask that can be applied to set all values below thresh to -inf
-        sim_leq_thresh = ~sim_leq_thresh[:, :self.n_sim_classes]
-        return sim_class_labels, sim_leq_thresh, sim_class_sims
+        return sim_class_labels, sim_class_sims
 
+    # returns scores for instance positives, class positives and filtered negatives
     def compute_InfoNCE_classSimilarity(self, anchor, pos, labels, enqueue=True):
         l_pos = torch.einsum('nc,nc->n', [anchor, pos]).unsqueeze(-1)
-        similar_labels, below_threshold, class_sims = self.get_similar_labels(labels)
+
+        similar_labels, class_sims = self.get_similar_labels(labels)
+        similar_labels = similar_labels.to(anchor.device)
+        class_sims = class_sims.to(anchor.device)
         masks = []
-        threshold_masks = []
-        dynamic_taus = []
+
+        # mask defines if same label
         for i in range(similar_labels.shape[1]):
             mask = (self.memorybank_labels[:, None] == similar_labels[None, :, i]).transpose(0, 1)
             masks.append(mask)
-            if self.use_all_ranked_classes_above_threshold:
-                threshold_masks.append(below_threshold[None, :, i].transpose(0, 1).repeat(1, mask.shape[1]))
-            dynamic_taus.append(self.get_dynamic_tau(class_sims[:, i]))
 
-        if self.one_loss_per_rank:
-            similarity_scores = reversed(class_sims.unique(sorted=True))
-            similarity_scores = similarity_scores[similarity_scores > -1]
-            new_masks = []
-            new_taus = []
-            for s in similarity_scores:
-                new_taus.append(self.get_dynamic_tau(torch.ones_like(dynamic_taus[0]) * s))
-                mask_all_siblings = torch.zeros_like(masks[0], dtype=torch.bool)
-                for i in range(similar_labels.shape[1]):
-                    same_score = class_sims[:, i] == s
-                    if any(same_score):
-                        mask_all_siblings[same_score] = mask_all_siblings[same_score] | masks[i][same_score]
-                new_masks.append(mask_all_siblings)
-            masks = new_masks
-            dynamic_taus = new_taus
+        # group together discretized similarity measures
+        #mask will now encode whether they are positives and have same rank, i.e. discrete similarity score
+        similarity_scores = reversed(class_sims.unique(sorted=True))
+        similarity_scores = similarity_scores[similarity_scores > -1]
+        new_masks = []
+        new_taus = []
+        for s in similarity_scores:
+            new_taus.append(self.get_dynamic_tau(torch.ones_like(class_sims[:, 0]) * s))
+            mask_all_siblings = torch.zeros_like(masks[0], dtype=torch.bool).to(anchor.device)
+            for i in range(similar_labels.shape[1]):
+                same_score = class_sims[:, i] == s
+                if any(same_score):
+                    mask_all_siblings[same_score] = mask_all_siblings[same_score] | masks[i][same_score]
+            new_masks.append(mask_all_siblings)
+        masks = new_masks
+        dynamic_taus = new_taus
 
         l_class_pos = torch.einsum('nc,ck->nk', [anchor, self.memorybank_InfoNCE.transpose(0, 1).clone()])
         l_neg = l_class_pos.clone()
@@ -231,15 +233,39 @@ class ContrastiveRanking(nn.Module):
         if self.training and enqueue:
             self.enqueue(pos, labels)
 
-        return l_pos, l_class_pos, l_neg, masks, threshold_masks, dynamic_taus
+        return l_pos, l_class_pos, l_neg, masks, dynamic_taus, pos, labels
 
-    def enqueue(self, feature, labels):
-        m_dim = feature.shape[0]
-        f = feature.detach()
-        self.memorybank_InfoNCE = torch.cat((f, self.memorybank_InfoNCE[:-m_dim, :]), dim=0)
-        self.memorybank_labels = torch.cat((labels, self.memorybank_labels[:-m_dim]), dim=0)
-        return self.memorybank_InfoNCE
+    @torch.no_grad()
+    def enqueue(self, keys, labels):
+        # gather keys before updating queue
+        if self.multiGPU:
+            keys = gather_all(keys)
+            labels = gather_all(labels)
+        m_dim = keys.shape[0]
 
+        batch_size = keys.shape[0]
+
+        ptr = int(self.queue_ptr)
+        # assert self.K % batch_size == 0  # for simplicity
+
+        # replace the keys at ptr (dequeue and enqueue)
+        if ptr + batch_size > self.memorybank_InfoNCE.shape[0]:
+            first_idx = self.memorybank_InfoNCE.shape[0] - ptr
+            second_idx = batch_size - first_idx
+
+            self.memorybank_InfoNCE[ptr:, :] = keys[:first_idx]
+            self.memorybank_labels[ptr:] = labels[:first_idx]
+            self.memorybank_InfoNCE[:second_idx, :] = keys[first_idx:]
+            self.memorybank_labels[:second_idx] = labels[first_idx:]
+            ptr = second_idx
+        else:
+            self.memorybank_InfoNCE[ptr:ptr + batch_size, :] = keys
+            self.memorybank_labels[ptr:ptr + batch_size] = labels
+            ptr = ptr + batch_size
+
+        self.queue_ptr[0] = ptr
+
+    @torch.no_grad()
     def update_weights(self):
         dict = {}
         for name, param in self.backbone_q.named_parameters():
@@ -248,14 +274,12 @@ class ContrastiveRanking(nn.Module):
             if name in dict:
                 param_k.data = self.m * param_k.data + (1 - self.m) * dict[name].data
 
-
+    @torch.no_grad()
     def get_dynamic_tau(self, similarities):
         dissimilarities = 1 - similarities
         d_taus = self.min_tau + (dissimilarities - 0) / (1 - 0) * (self.max_tau - self.min_tau)
-        return d_taus
 
-    def visualize_layers(self, writer_train, epoch):
-        self.backbone_q.module.visualize_layers(writer_train, epoch)
+        return d_taus
 
 
 class ContrastiveRankingLoss:
@@ -270,4 +294,6 @@ class ContrastiveRankingLoss:
             else:
                 loss = loss + self.cross_entropy(val['score'], val['target'])
         loss = loss / float(len(outputs))
+        if len(loss.shape) == 0:
+            loss = loss.unsqueeze(0)
         return loss

@@ -1,9 +1,11 @@
 from __future__ import print_function
-from PIL import Image
+
 import os
 import os.path
-import numpy as np
 import sys
+
+import numpy as np
+from PIL import Image
 
 if sys.version_info[0] == 2:
     import cPickle as pickle
@@ -13,7 +15,7 @@ else:
 from torchvision.datasets.vision import VisionDataset
 from torchvision.datasets.utils import check_integrity, download_and_extract_archive
 
-
+#adapted from pytorch/vision
 class CIFAR10(VisionDataset):
     """`CIFAR10 <https://www.cs.toronto.edu/~kriz/cifar.html>`_ Dataset.
 
@@ -90,13 +92,11 @@ class CIFAR10(VisionDataset):
                     self.targets.append([entry['coarse_labels'], entry['fine_labels']])
                 elif labelset == 'coarse':
                     self.targets.extend(entry['coarse_labels'])
-                elif labelset == 'filenames':
-                    self.targets.extend(entry['filenames'])
                 else:
                     self.targets.extend(entry['fine_labels'])
 
-        self.data = np.vstack(self.data).reshape(-1, 3, 32, 32)
-        self.data = self.data.transpose((0, 2, 3, 1))  # convert to HWC
+            self.data = np.vstack(self.data).reshape(-1, 3, 32, 32)
+            self.data = self.data.transpose((0, 2, 3, 1))  # convert to HWC
 
         self._load_meta()
 
