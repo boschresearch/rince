@@ -1,8 +1,8 @@
-#Ranking Info Noise Contrastive Estimation: Boosting Contrastive Learning via Ranked Positives
+# Ranking Info Noise Contrastive Estimation: Boosting Contrastive Learning via Ranked Positives
  
-Official PyTorch implementation of the AAAI 2022 paper [Ranking Info Noise Contrastive Estimation: Boosting Contrastive Learning via Ranked Positives](addLinktoArixiv). The code allows the users to reproduce and extend the results reported in the study. 
+Official PyTorch implementation of the AAAI 2022 paper [Ranking Info Noise Contrastive Estimation: Boosting Contrastive Learning via Ranked Positives](https://arxiv.org/abs/2201.11736). The code allows the users to reproduce and extend the results reported in the study. 
 
-#Overview 
+# Overview 
 
 This repository provides the code for RINCE, a contrastive loss that can exploit ranking information, such that same samples are very close and similar samples close in the embedding space (see Figure below).
 
@@ -23,7 +23,7 @@ conda env create --file requirements.yml python=3.7
 conda activate rince
 ```
 
-##Datasets
+## Datasets
 
 Cifar should download automatically on demand. 
 Download TinyImageNet and split both the training and val set into folders with inliers and outliers. The class names for both sets can be found in
@@ -105,7 +105,7 @@ Check out the ImageNet branch of this repository.
 
 ## Pretrained Models
 
-The checkpoints are available [here](TODO). 
+Pretrained models are coming soon. 
 
 ## Citation
 If this code useful in your research we would kindly ask you to cite our paper.
