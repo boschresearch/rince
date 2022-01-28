@@ -113,7 +113,7 @@ If this code useful in your research we would kindly ask you to cite our paper.
 @article{rince2022AAAI,
     title={Ranking Info Noise Contrastive Estimation: Boosting Contrastive Learning via Ranked Positives},
     author={Hoffmann, David T and Behrmann, Nadine and Gall, Juergen and Brox, Thomas and Noroozi, Mehdi},
-    journal={arXiv preprint},
+    journal={arXiv preprint arXiv:2201.11736},
     year={2022}
 }
 ```
