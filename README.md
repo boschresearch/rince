@@ -64,7 +64,9 @@ python main_ce.py --data_folder=./data/imagenet100/train --dataset=imagenet_100 
 
 Set ```--ckpt ``` to the last checkpoint of the model.
 
-To evaluate RINCE and SCL with linear probe, retrieval on cifar 100 labels, retrieval on cifar 100 coarse labels, and OOD on cifar10 and TinyImageNet run the respective script:
+To evaluate the ImageNet models, checkout the cifar branch and run the evaluation scripts.
+
+To evaluate RINCE and SCL with linear probe, retrieval on cifar 100 labels, retrieval on cifar 100 coarse labels, OOD on cifar10 or TinyImageNet run the respective script:
 
 
 ```
