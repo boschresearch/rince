@@ -1,12 +1,12 @@
 # Ranking Info Noise Contrastive Estimation: Boosting Contrastive Learning via Ranked Positives
- 
-Official PyTorch implementation of the AAAI 2022 paper [Ranking Info Noise Contrastive Estimation: Boosting Contrastive Learning via Ranked Positives](https://arxiv.org/abs/2201.11736). The code allows the users to reproduce and extend the results reported in the study. 
 
-# Overview 
+Official PyTorch implementation of the AAAI 2022 paper [Ranking Info Noise Contrastive Estimation: Boosting Contrastive Learning via Ranked Positives](https://arxiv.org/abs/2201.11736). The code allows the users to reproduce and extend the results reported in the study.
+
+# Overview
 
 This repository provides the code for RINCE, a contrastive loss that can exploit ranking information, such that same samples are very close and similar samples close in the embedding space (see Figure below).
 
-![RINCE teaser](figures/RINCE_teaser.png) 
+![RINCE teaser](figures/RINCE_teaser.png)
 
 ## Setup
 
@@ -25,7 +25,7 @@ conda activate rince
 
 ## Datasets
 
-Download ImageNet, create the different ImageNet-100 splits with symbolic links using the following lists. You need to create both, a train and a val folder
+Download ImageNet, create the different ImageNet-100 splits with symbolic links using the following lists. You need to create both, a train and a val folder.
 Download AwA2.
 ```
 ./datasets/ImageNet-100.txt
@@ -37,7 +37,7 @@ create a symlink to your data directories in the folder ./data
 
 ## Training on ImageNet-100
 
-### Rince 
+### Rince
 
 To train RINCE out-in on ImageNet-100
 
@@ -62,11 +62,10 @@ python main_ce.py --data_folder=./data/imagenet100/train --dataset=imagenet_100 
 ## Testing the Model
 
 
-Set ```--ckpt ``` to the last checkpoint of the model. 
+Set ```--ckpt ``` to the last checkpoint of the model.
 
-To evaluate RINCE and SCL run for linear probe, retrieval on cifar 100 labels, retrieval on cifar 100 coarse labels, and OOD on cifar10 and TinyImageNet the respective script:
+To evaluate RINCE and SCL with linear probe, retrieval on cifar 100 labels, retrieval on cifar 100 coarse labels, and OOD on cifar10 and TinyImageNet run the respective script:
 
-To evaluate the models checkout the cifar branch and run the following:
 
 ```
 python main_linear.py --model=resnet18_standard --batch_size 512 --learning_rate 5 --ckpt $path2chkpt/last.pth --data_folder=./data/imagenet100/images --dataset=imagenet_100 --size=224 --num_workers=32 --epochs=100
@@ -78,10 +77,10 @@ python out_of_dist_detection.py --model=resnet18_standard --dataset=imagenet_100
 
 ## Pretrained Models
 
-Pretrained models are coming soon. 
+Pretrained models can be found in [trained_models](trained_models).
 
 ## Citation
-If this code useful in your research we would kindly ask you to cite our paper.
+If this code is useful in your research we would kindly ask you to cite our paper.
 ```
 @article{rince2022AAAI,
     title={Ranking Info Noise Contrastive Estimation: Boosting Contrastive Learning via Ranked Positives},
@@ -91,13 +90,13 @@ If this code useful in your research we would kindly ask you to cite our paper.
 }
 ```
 
-##  License 
+##  License
 
 This project is open-sourced under the AGPL-3.0 license. See the [License](LICENSE) file for details.
 
-For a list of other open source components included i nthis project, see the file [3rd-party-licenses.txt](3rd-party-licenses.txt).
+For a list of other open source components included in this project, see the file [3rd-party-licenses.txt](3rd-party-licenses.txt).
 
-## Purpose of the project 
+## Purpose of the project
 This software is a research prototype, solely developed for and published as
 part of the publication cited above. It will neither be
 maintained nor monitored in any way.
