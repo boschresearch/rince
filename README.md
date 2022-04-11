@@ -1,12 +1,12 @@
 # Ranking Info Noise Contrastive Estimation: Boosting Contrastive Learning via Ranked Positives
- 
-Official PyTorch implementation of the AAAI 2022 paper [Ranking Info Noise Contrastive Estimation: Boosting Contrastive Learning via Ranked Positives](https://arxiv.org/abs/2201.11736). The code allows the users to reproduce and extend the results reported in the study. 
 
-# Overview 
+Official PyTorch implementation of the AAAI 2022 paper [Ranking Info Noise Contrastive Estimation: Boosting Contrastive Learning via Ranked Positives](https://arxiv.org/abs/2201.11736). The code allows the users to reproduce and extend the results reported in the study.
+
+# Overview
 
 This repository provides the code for RINCE, a contrastive loss that can exploit ranking information, such that same samples are very close and similar samples close in the embedding space (see Figure below).
 
-![RINCE teaser](figures/RINCE_teaser.png) 
+![RINCE teaser](figures/RINCE_teaser.png)
 
 ## Setup
 
@@ -25,7 +25,7 @@ conda activate rince
 
 ## Datasets
 
-Cifar should download automatically on demand. 
+Cifar should download automatically on demand.
 Download TinyImageNet and split both the training and val set into folders with inliers and outliers. The class names for both sets can be found in
 ```
 ./datasets/tiny_imagenet_inliers.txt
@@ -35,7 +35,7 @@ create a symlink to your data directories in the folder ./data
 
 ## Training
 
-### Rince 
+### Rince
 
 To train RINCE out-in on Cifar100 run
 
@@ -77,13 +77,13 @@ python main_ce.py --batch_size 512 --num_workers 8 --print_freq 100 --data_folde
 ## Testing the Model
 
 
-Set ```--ckpt ``` to the last checkpoint of the model. 
+Set ```--ckpt ``` to the last checkpoint of the model.
 
 To evaluate RINCE and SCL run for linear probe, retrieval on cifar 100 labels, retrieval on cifar 100 coarse labels, and OOD on cifar10 and TinyImageNet the respective script:
 
 ```
 python main_linear.py --batch_size 512 --learning_rate 5 --dataset cifar100 --data_folder ./data --model resnet50 --model_type contrastive --ckpt $path2chkpt/last.pth
-python retrieval.py --dataset cifar100 --data_folder ./data --labelset fine --model resnet50 --model_type contrastive --ckpt $path2chkpt/last.pth 
+python retrieval.py --dataset cifar100 --data_folder ./data --labelset fine --model resnet50 --model_type contrastive --ckpt $path2chkpt/last.pth
 python retrieval.py --dataset cifar100 --data_folder ./data --labelset coarse --model resnet50 --model_type contrastive --ckpt $path2chkpt/last.pth
 python out_of_dist_detection.py --dataset_outliers cifar10 --data_folder_outliers ./data --dataset cifar100 --data_folder ./data --size 32 --model resnet50 --model_type contrastive --ckpt $path2chkpt/last.pth
 python out_of_dist_detection.py --dataset_outliers tiny_imagenet --data_folder_outliers ./data --dataset cifar100 --data_folder ./data --size 32 --model resnet50 --model_type contrastive --ckpt $path2chkpt/last.pth
@@ -105,10 +105,10 @@ Check out the ImageNet branch of this repository.
 
 ## Pretrained Models
 
-Pretrained models are coming soon. 
+Pretrained models can be found in [trained_models](trained_models).
 
 ## Citation
-If this code useful in your research we would kindly ask you to cite our paper.
+If this code is useful in your research we would kindly ask you to cite our paper.
 ```
 @article{rince2022AAAI,
     title={Ranking Info Noise Contrastive Estimation: Boosting Contrastive Learning via Ranked Positives},
@@ -118,20 +118,20 @@ If this code useful in your research we would kindly ask you to cite our paper.
 }
 ```
 
-##  License 
+##  License
 
 This project is open-sourced under the AGPL-3.0 license. See the [License](LICENSE) file for details.
 
-For a list of other open source components included i nthis project, see the file [3rd-party-licenses.txt](3rd-party-licenses.txt).
+For a list of other open source components included in this project, see the file [3rd-party-licenses.txt](3rd-party-licenses.txt).
 
-## Purpose of the project 
+## Purpose of the project
 This software is a research prototype, solely developed for and published as
 part of the publication cited above. It will neither be
 maintained nor monitored in any way.
 
 ## Contact
 Please feel free to open an issue or contact us personally if you have questions, need help, or need explanations.
-Write to one of the following email addresses, and maybe put one other in the cc:
+Write to one of the following email addresses, and maybe put the other in the cc:
 
 david.hoffmann2@de.bosch.com
 
