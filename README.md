@@ -8,6 +8,22 @@ This repository provides the code for RINCE, a contrastive loss that can exploit
 
 ![RINCE teaser](figures/RINCE_teaser.png)
 
+# Talks
+<div align="center">
+<table border="0">
+ <tr>
+<td> A short talk can be found here:</td>
+<td> The full talk is available here:</td>
+ </tr>
+<tr>
+<td><a href="https://www.youtube.com/watch?v=JYhN9Uw1-Ww"><img src="https://img.youtube.com/vi/JYhN9Uw1-Ww/0.jpg" alt="Click to see the short talk" width="90%"></a></td>
+
+<td><a href="https://www.youtube.com/watch?v=RV3CAvmsCSc"><img src="https://img.youtube.com/vi/RV3CAvmsCSc/0.jpg" alt="Click to see the full talk" width="90%"></a></td>
+
+ </tr>
+</table>
+</div>
+
 ## Setup
 
 Clone this repository.
